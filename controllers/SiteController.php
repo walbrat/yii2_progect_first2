@@ -2,127 +2,64 @@
 
 namespace app\controllers;
 
+use app\models\AgentModel;
+use app\models\Category;
+use app\repositories\AgentRepository;
+use app\models\AgentDateFilterModel;
 use Yii;
-use yii\filters\AccessControl;
 use yii\web\Controller;
-use yii\web\Response;
-use yii\filters\VerbFilter;
-use app\models\LoginForm;
-use app\models\ContactForm;
 
 class SiteController extends Controller
 {
-    /**
-     * {@inheritdoc}
-     */
-    public function behaviors()
-    {
-        return [
-            'access' => [
-                'class' => AccessControl::class,
-                'only' => ['logout'],
-                'rules' => [
-                    [
-                        'actions' => ['logout'],
-                        'allow' => true,
-                        'roles' => ['@'],
-                    ],
-                ],
-            ],
-            'verbs' => [
-                'class' => VerbFilter::class,
-                'actions' => [
-                    'logout' => ['post'],
-                ],
-            ],
-        ];
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function actions()
-    {
-        return [
-            'error' => [
-                'class' => 'yii\web\ErrorAction',
-            ],
-            'captcha' => [
-                'class' => 'yii\captcha\CaptchaAction',
-                'fixedVerifyCode' => YII_ENV_TEST ? 'testme' : null,
-            ],
-        ];
-    }
-
     /**
      * Displays homepage.
      *
      * @return string
      */
+
     public function actionIndex()
     {
-        return $this->render('index');
-    }
+        $data = Yii::$app->request->post();
+        $completedAfter = $data['AgentDateFilterModel']['completedAfter'];
+        $completedBefore = $data['AgentDateFilterModel']['completedBefore'];
 
-    /**
-     * Login action.
-     *
-     * @return Response|string
-     */
-    public function actionLogin()
-    {
-        if (!Yii::$app->user->isGuest) {
-            return $this->goHome();
+        $rows = (new AgentRepository())->findByCategories($completedAfter, $completedBefore);
+
+        $agents = [];
+        $agentsMap = $this->toMap($rows);
+        foreach (array_keys($agentsMap) as $agent) {
+            $model = new AgentModel();
+            $model->checkAmount = $agentsMap[$agent][Category::CHECK];
+            $model->disconnectionAmount = $agentsMap[$agent][Category::DISCONNECTION];
+            $model->techAmount = $agentsMap[$agent][Category::TECH];
+            $model->otherAmount = $agentsMap[$agent][Category::OTHER];
+            $model->summary = $model->checkAmount + $model->disconnectionAmount + $model->techAmount + $model->otherAmount;
+            $model->name = $agent;
+
+            $agents[] = $model;
         }
 
-        $model = new LoginForm();
-        if ($model->load(Yii::$app->request->post()) && $model->login()) {
-            return $this->goBack();
+        return $this->render('index', ['agents' => $agents, 'model' => new AgentDateFilterModel($completedAfter, $completedBefore)]);
+    }
+
+    /**
+     * @param $rows
+     * @return array
+     */
+    public function toMap($rows)
+    {
+        $agentsMap = [];
+        foreach ($rows as $item) {
+            $agent = $item['agent'];
+            $category = $item['category'];
+            $count = $item['count'];
+
+            if (!isset($agentsMap[$agent])) {
+                $agentsMap[$agent] = [];
+            }
+            $agentsMap[$agent][$category] = $count;
         }
 
-        $model->password = '';
-        return $this->render('login', [
-            'model' => $model,
-        ]);
-    }
-
-    /**
-     * Logout action.
-     *
-     * @return Response
-     */
-    public function actionLogout()
-    {
-        Yii::$app->user->logout();
-
-        return $this->goHome();
-    }
-
-    /**
-     * Displays contact page.
-     *
-     * @return Response|string
-     */
-    public function actionContact()
-    {
-        $model = new ContactForm();
-        if ($model->load(Yii::$app->request->post()) && $model->contact(Yii::$app->params['adminEmail'])) {
-            Yii::$app->session->setFlash('contactFormSubmitted');
-
-            return $this->refresh();
-        }
-        return $this->render('contact', [
-            'model' => $model,
-        ]);
-    }
-
-    /**
-     * Displays about page.
-     *
-     * @return string
-     */
-    public function actionAbout()
-    {
-        return $this->render('about');
+        return $agentsMap;
     }
 }
